@@ -14,106 +14,80 @@ const Sidebar = () => {
   const [loading, setLoading] = useState(false);
   const [duplicates, setDuplicates] = useState(null);
   const [error, setError] = useState(null);
-  const [progress, setProgress] = useState("");
 
   const findDuplicates = async () => {
     setLoading(true);
     setDuplicates(null);
     setError(null);
-    setProgress("");
-
-    const FIELD_ID = "title"; // hardcoded since all content types use title as displayField
 
     try {
       const spaceId = sdk.ids.space;
       const environmentId = sdk.ids.environment;
+      const contentTypeId = sdk.ids.contentType;
+      const currentEntryId = sdk.ids.entry;
       const cma = sdk.cma;
 
-      // 1. Get all content types
-      setProgress("Fetching content types...");
-      const contentTypesResponse = await cma.contentType.getMany({
+      // Get the display field for this content type
+      const contentType = await cma.contentType.get({
         spaceId,
         environmentId,
-        query: { limit: 200 },
+        contentTypeId,
       });
+      const fieldId = contentType.displayField || "title";
 
-      const contentTypes = contentTypesResponse.items;
-      const allDuplicates = {};
+      // Get the current entry's display field value
+      const currentLocale = sdk.locales.default;
+      const fieldValue = sdk.entry.fields[fieldId]?.getValue(currentLocale);
 
-      // 2. Loop through each content type
-      for (const ct of contentTypes) {
-        const contentTypeId = ct.sys.id;
-
-        setProgress(`Scanning: ${ct.name}...`);
-
-        let allEntries = [];
-        let skip = 0;
-        let total = 1;
-
-        // 3. Paginate through all entries
-        while (allEntries.length < total) {
-          const response = await cma.entry.getMany({
-            spaceId,
-            environmentId,
-            query: {
-              content_type: contentTypeId,
-              skip,
-              limit: 1000,
-              "sys.archivedAt[exists]": false,
-            },
-          });
-
-          allEntries = allEntries.concat(response.items);
-          total = response.total;
-          skip += 1000;
-        }
-
-        // 4. Map entries by title field
-        const keyMap = {};
-
-        allEntries.forEach((entry) => {
-          const fieldData = entry.fields[FIELD_ID];
-          if (!fieldData) return;
-
-          const locales = Object.keys(fieldData);
-          const keyVal = locales.length > 0 ? fieldData[locales[0]] : null;
-
-          if (keyVal) {
-            if (!keyMap[keyVal]) keyMap[keyVal] = [];
-            keyMap[keyVal].push({
-              id: entry.sys.id,
-              status: entry.sys.publishedAt ? "Published" : "Draft",
-              updatedAt: new Date(entry.sys.updatedAt).toLocaleDateString(),
-              url: `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entry.sys.id}`,
-            });
-          }
-        });
-
-        // 5. Collect duplicates for this content type
-        Object.entries(keyMap).forEach(([val, entries]) => {
-          if (entries.length > 1) {
-            allDuplicates[`[${ct.name}] ${val}`] = entries;
-          }
-        });
+      if (!fieldValue || typeof fieldValue !== "string") {
+        setDuplicates([]);
+        return;
       }
 
-      setDuplicates(allDuplicates);
-      setProgress("");
+      const normalizedValue = fieldValue.trim().toLowerCase();
+
+      // Fetch all entries of this content type and find ones with the same display field value
+      let allEntries = [];
+      let skip = 0;
+      let total = 1;
+
+      while (allEntries.length < total) {
+        const response = await cma.entry.getMany({
+          spaceId,
+          environmentId,
+          query: {
+            content_type: contentTypeId,
+            skip,
+            limit: 1000,
+            "sys.archivedAt[exists]": false,
+          },
+        });
+        allEntries = allEntries.concat(response.items);
+        total = response.total;
+        skip += 1000;
+      }
+
+      const matches = allEntries.filter((entry) => {
+        if (entry.sys.id === currentEntryId) return false;
+        const fieldData = entry.fields[fieldId];
+        if (!fieldData) return false;
+        const locales = Object.keys(fieldData);
+        const raw = locales.length > 0 ? fieldData[locales[0]] : null;
+        return typeof raw === "string" && raw.trim().toLowerCase() === normalizedValue;
+      }).map((entry) => ({
+        id: entry.sys.id,
+        status: entry.sys.publishedAt ? "Published" : "Draft",
+        updatedAt: new Date(entry.sys.updatedAt).toLocaleDateString(),
+        url: `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entry.sys.id}`,
+      }));
+
+      setDuplicates(matches);
     } catch (err) {
       setError(err.message || "Something went wrong.");
     } finally {
       setLoading(false);
     }
   };
-
-  const duplicateKeys = duplicates ? Object.keys(duplicates) : [];
-
-  const actualDuplicates = duplicates
-    ? Object.values(duplicates).reduce(
-        (sum, entries) => sum + (entries.length - 1),
-        0,
-      )
-    : 0;
 
   return (
     <Box padding="spacingM">
@@ -128,14 +102,14 @@ const Sidebar = () => {
         isDisabled={loading}
         isFullWidth
       >
-        {loading ? "Scanning..." : "Scan for Duplicates"}
+        {loading ? "Checking..." : "Check for Duplicates"}
       </Button>
 
       {loading && (
         <Stack marginTop="spacingM" alignItems="center">
           <Spinner size="small" />
           <Text fontColor="gray600" fontSize="fontSizeS">
-            {progress}
+            Searching for duplicates...
           </Text>
         </Stack>
       )}
@@ -146,22 +120,21 @@ const Sidebar = () => {
         </Note>
       )}
 
-      {duplicates && duplicateKeys.length === 0 && (
+      {duplicates && duplicates.length === 0 && (
         <Note variant="positive" style={{ marginTop: "12px" }}>
           ✨ No duplicates found!
         </Note>
       )}
 
-      {duplicates && duplicateKeys.length > 0 && (
+      {duplicates && duplicates.length > 0 && (
         <Box marginTop="spacingM">
           <Note variant="warning" style={{ marginBottom: "12px" }}>
-            Found {actualDuplicates} duplicate entr ies across{" "}
-            {duplicateKeys.length} duplicate set(s)
+            Found {duplicates.length} duplicate {duplicates.length === 1 ? "entry" : "entries"}
           </Note>
 
-          {duplicateKeys.map((name) => (
+          {duplicates.map((entry) => (
             <Box
-              key={name}
+              key={entry.id}
               padding="spacingS"
               style={{
                 border: "1px solid #e5e5e5",
@@ -169,24 +142,12 @@ const Sidebar = () => {
                 marginBottom: "8px",
               }}
             >
-              <Text
-                fontWeight="fontWeightMedium"
-                fontSize="fontSizeS"
-                marginBottom="spacingXs"
-              >
-                {name}
+              <Text fontSize="fontSizeS" fontColor="gray600">
+                {entry.status} · {entry.updatedAt} ·{" "}
+                <a href={entry.url} target="_blank" rel="noreferrer">
+                  Open
+                </a>
               </Text>
-
-              {duplicates[name].map((entry) => (
-                <Box key={entry.id} style={{ marginTop: "4px" }}>
-                  <Text fontSize="fontSizeS" fontColor="gray600">
-                    {entry.status} · {entry.updatedAt} ·{" "}
-                    <a href={entry.url} target="_blank" rel="noreferrer">
-                      Open
-                    </a>
-                  </Text>
-                </Box>
-              ))}
             </Box>
           ))}
         </Box>

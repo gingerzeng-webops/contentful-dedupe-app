@@ -22,8 +22,6 @@ const Page = () => {
     setError(null);
     setProgress("");
 
-    const FIELD_ID = "title";
-
     try {
       const spaceId = sdk.ids.space;
       const environmentId = sdk.ids.environment;
@@ -41,6 +39,7 @@ const Page = () => {
 
       for (const ct of contentTypes) {
         const contentTypeId = ct.sys.id;
+        const fieldId = ct.displayField || "title";
         setProgress(`Scanning: ${ct.name}...`);
 
         let allEntries = [];
@@ -67,16 +66,18 @@ const Page = () => {
         const keyMap = {};
 
         allEntries.forEach((entry) => {
-          const fieldData = entry.fields[FIELD_ID];
+          const fieldData = entry.fields[fieldId];
           if (!fieldData) return;
 
           const locales = Object.keys(fieldData);
-          const keyVal = locales.length > 0 ? fieldData[locales[0]] : null;
+          const raw = locales.length > 0 ? fieldData[locales[0]] : null;
+          const keyVal = typeof raw === "string" ? raw.trim().toLowerCase() : null;
 
           if (keyVal) {
             if (!keyMap[keyVal]) keyMap[keyVal] = [];
             keyMap[keyVal].push({
               id: entry.sys.id,
+              title: raw.trim(),
               status: entry.sys.publishedAt ? "Published" : "Draft",
               updatedAt: new Date(entry.sys.updatedAt).toLocaleDateString(),
               url: `https://app.contentful.com/spaces/${spaceId}/environments/${environmentId}/entries/${entry.sys.id}`,
@@ -84,9 +85,9 @@ const Page = () => {
           }
         });
 
-        Object.entries(keyMap).forEach(([val, entries]) => {
+        Object.entries(keyMap).forEach(([, entries]) => {
           if (entries.length > 1) {
-            allDuplicates[`[${ct.name}] ${val}`] = entries;
+            allDuplicates[`[${ct.name}] ${entries[0].title}`] = entries;
           }
         });
       }
