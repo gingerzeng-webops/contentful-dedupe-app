@@ -9,6 +9,8 @@ import {
 } from "@contentful/f36-components";
 import { useState } from "react";
 
+const CTA_CONTENT_TYPE_ID = "cta";
+
 const Page = () => {
   const sdk = useSDK();
   const [loading, setLoading] = useState(false);
@@ -27,17 +29,16 @@ const Page = () => {
       const environmentId = sdk.ids.environment;
       const cma = sdk.cma;
 
-      setProgress("Fetching content types...");
-      const contentTypesResponse = await cma.contentType.getMany({
+      setProgress("Fetching CTA content type...");
+      const contentType = await cma.contentType.get({
         spaceId,
         environmentId,
-        query: { limit: 200 },
+        contentTypeId: CTA_CONTENT_TYPE_ID,
       });
 
-      const contentTypes = contentTypesResponse.items;
       const allDuplicates = {};
 
-      for (const ct of contentTypes) {
+      for (const ct of [contentType]) {
         const contentTypeId = ct.sys.id;
         const fieldId = ct.displayField || "title";
         setProgress(`Scanning: ${ct.name}...`);
@@ -71,7 +72,8 @@ const Page = () => {
 
           const locales = Object.keys(fieldData);
           const raw = locales.length > 0 ? fieldData[locales[0]] : null;
-          const keyVal = typeof raw === "string" ? raw.trim().toLowerCase() : null;
+          const keyVal =
+            typeof raw === "string" ? raw.trim().toLowerCase() : null;
 
           if (keyVal) {
             if (!keyMap[keyVal]) keyMap[keyVal] = [];
@@ -111,10 +113,10 @@ const Page = () => {
         fontSize="fontSizeXl"
         marginBottom="spacingS"
       >
-        🔍 Duplicate Entry Checker
+        CTA Duplicate Entry Checker
       </Text>
       <Text fontColor="gray600" marginBottom="spacingL">
-        Scans all content types in this environment for entries sharing the same
+        Scans CTA entries in this environment for entries sharing the same
         title. Archived entries are excluded.
       </Text>
 
@@ -139,15 +141,14 @@ const Page = () => {
 
       {duplicates && duplicateKeys.length === 0 && (
         <Note variant="positive" style={{ marginTop: "16px" }}>
-          ✨ No duplicates found across all content types!
+          No duplicate CTA entries found!
         </Note>
       )}
 
       {duplicates && duplicateKeys.length > 0 && (
         <Box marginTop="spacingL">
           <Note variant="warning" style={{ marginBottom: "16px" }}>
-            Found {duplicateKeys.length} duplicate set(s) across all content
-            types
+            Found {duplicateKeys.length} duplicate CTA set(s)
           </Note>
 
           {duplicateKeys.map((name) => (
